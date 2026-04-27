@@ -3,7 +3,7 @@ name: Monitor Parkingów P+R
 on:
   schedule:
 
-    - cron: '*/30 * * * *'
+    - cron: '*/15 * * * *'
   workflow_dispatch: 
 
 jobs:
