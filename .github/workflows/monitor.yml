@@ -1,10 +1,9 @@
 name: Monitor Parkingów P+R
 
 on:
-  schedule:
-
-    - cron: '*/15 * * * *'
-  workflow_dispatch: 
+  repository_dispatch:
+    types: [pipedream_trigger]
+  workflow_dispatch:
 
 jobs:
   scrape:
