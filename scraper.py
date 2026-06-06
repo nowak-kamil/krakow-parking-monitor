@@ -1,3 +1,31 @@
+"""
+P+R PARKING AVAILABILITY MONITOR - KRAKÓW
+-----------------------------------------
+This script is a web scraper designed to monitor the real-time availability of parking spots
+in the 'Park and Ride' (P+R) system in Kraków, Poland.
+
+Key Functionalities:
+1. Web Scraping: Uses the Playwright library to launch a headless Chromium browser,
+   navigates to the ZTP Kraków website, and waits for the network to become idle to
+   ensure all dynamic data is loaded.
+2. Data Extraction: Employs Regular Expressions (Regex) to parse the HTML content
+   and find specific parking names along with their current free space count.
+3. Local Database Storage: Initializes and maintains an SQLite database (archiwum_parkingow.db).
+   Each successful scrape inserts a new record with a timestamp, parking name, and free spots.
+4. CSV Export: Synchronizes the local database with a CSV file (archiwum_parkingow.csv).
+   It uses an 'exported' flag in the database to ensure that only new, unique records
+   are appended to the file, preventing duplicates.
+5. Error Handling: Includes robust try-except blocks to handle timeouts, browser
+   initialization errors, and file system issues, ensuring the script can be
+   interrupted safely (e.g., via KeyboardInterrupt).
+
+Technical Stack:
+- Playwright (Automation)
+- SQLite3 (Data Persistence)
+- CSV & Regex (Data Processing)
+- Datetime (Logging/Timestamping)
+"""
+
 import sqlite3
 import csv
 import time
@@ -8,8 +36,8 @@ from datetime import datetime
 from playwright.sync_api import sync_playwright
 
 URL = 'https://ztp.krakow.pl/parkingi-pr/sprawdz-wolne-miejsca-pr'
-DB_PATH = 'db_parking.db'
-CSV_PATH = 'csv_parking.csv'
+DB_PATH = 'archiwum_parkingow.db'
+CSV_PATH = 'archiwum_parkingow.csv'
 
 PARKING_NAMES = [
     'P+R Górka Narodowa', 'P+R Pachońskiego', 'P+R Krowodrza Górka',
@@ -19,11 +47,11 @@ PARKING_NAMES = [
 def init_db():
     conn = sqlite3.connect(DB_PATH)
     conn.execute('''
-        CREATE TABLE IF NOT EXISTS history (
+        CREATE TABLE IF NOT EXISTS historia (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             timestamp TEXT,
-            parking TEXT,
-            free INTEGER,
+            nazwa TEXT,
+            wolne INTEGER,
             exported INTEGER DEFAULT 0
         )
     ''')
@@ -32,11 +60,11 @@ def init_db():
 
 
 def export_to_csv(conn):
-    cursor = conn.execute('SELECT id, timestamp, parking, free FROM history WHERE exported = 0 ORDER BY id')
+    cursor = conn.execute('SELECT id, timestamp, nazwa, wolne FROM historia WHERE exported = 0 ORDER BY id')
     rows = cursor.fetchall()
 
     if not rows:
-        print('No data to save in CSV.')
+        print('No new data to append to CSV.')
         return
 
     file_exists = os.path.isfile(CSV_PATH)
@@ -44,23 +72,23 @@ def export_to_csv(conn):
         with open(CSV_PATH, 'a', newline='', encoding='utf-8-sig') as f:
             writer = csv.writer(f, delimiter=';')
             if not file_exists:
-                writer.writerow(['Date and Time', 'Parking name', 'Free parking space'])
+                writer.writerow(['Data i Godzina', 'Parking', 'Wolne miejsca'])
 
             data_to_save = [row[1:] for row in rows]
             writer.writerows(data_to_save)
 
             ids = [row[0] for row in rows]
             placeholders = ",".join(["?"] * len(ids))
-            conn.execute(f'UPDATE history SET exported = 1 WHERE id IN ({placeholders})', ids)
+            conn.execute(f'UPDATE historia SET exported = 1 WHERE id IN ({placeholders})', ids)
             conn.commit()
-            print(f'Add {len(rows)} new rows to {CSV_PATH}')
+            print(f'Added {len(rows)} new rows to {CSV_PATH}')
     except Exception as e:
-        print(f'Error while saving to CSV: {e}')
+        print(f'Error while writing to CSV: {e}')
 
 
 def run_monitor():
     db_conn = init_db()
-    print('PARKINGÓW P+R KRAKÓW MONITOR ')
+    print('P+R KRAKÓW PARKING MONITOR')
 
     with sync_playwright() as p:
         try:
@@ -70,7 +98,7 @@ def run_monitor():
                     page = context.new_page()
 
                     ts = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-                    print(f'[{ts}] Data download...')
+                    print(f'[{ts}] Loading data...')
 
                     page.goto(URL, wait_until='networkidle', timeout=60000)
                     html_content = page.content()
@@ -83,7 +111,7 @@ def run_monitor():
                         if match:
                             wolne = int(match.group(1))
                             db_conn.execute(
-                                'INSERT INTO history (timestamp, parking, free ) VALUES (?, ?, ?)',
+                                'INSERT INTO historia (timestamp, nazwa, wolne) VALUES (?, ?, ?)',
                                 (ts, name, wolne)
                             )
                             found_count += 1
@@ -92,19 +120,19 @@ def run_monitor():
                         db_conn.commit()
                         export_to_csv(db_conn)
                     else:
-                        print('Error: No data on site')
+                        print('Error: No data found on the page.')
 
                 except Exception as err:
-                    print(f'Error: {err}')
+                    print(f'Error during session: {err}')
 
                 finally:
                     browser.close()
-                    print('Browser closed')
+                    print('Browser closed, resources freed.')
 
-                print('Waiting')
+                print('Waiting...')
 
         except KeyboardInterrupt:
-            print('\nClosing...')
+            print('\nZStopping script...')
         finally:
             if db_conn:
                 export_to_csv(db_conn)
